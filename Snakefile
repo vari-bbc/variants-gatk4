@@ -52,7 +52,13 @@ rule all:
     input:
         "analysis/multiqc/multiqc_report.html",
         #expand("analysis/final/06_filter_vcf/all.merged.filt.PASS.{var_type}.vcf.gz.vt_peek.txt", var_type=["SNP", "INDEL"]),
-        "analysis/final/07_snpEff/all.merged.filt.PASS.snpEff.vcf.gz"
+        "analysis/final/07_annot/snpEff/all.merged.filt.PASS.snpEff.vcf.gz",
+        #"analysis/final/07_annot/Funcotator/all.merged.filt.PASS.Funcotator.vcf.gz",
+        #"analysis/final/07_annot/Funcotator/target_genes_only/all.merged.filt.PASS.Funcotator.targetsOnly.filt.xlsx",
+        expand("analysis/final/07_annot/Funcotator/target_genes_only/table/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.xlsx", sample=samples['sample'].unique()),
+        "analysis/final/07_annot/Funcotator/target_genes_only/table/all.merged.filt.PASS.Funcotator.targetsOnly.filt.xlsx",
+        expand("analysis/final/07_annot/Funcotator/target_genes_only/custom_filters/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.v3.xlsx", sample=samples['sample'].unique())
+
 
 def get_orig_fastq(wildcards):
     if wildcards.read == "R1":
@@ -453,16 +459,18 @@ def get_filt_params (wildcards):
     # parameters adapted from https://gencore.bio.nyu.edu/variant-calling-pipeline-gatk4/
     if (wildcards.var_type == "SNP"):
         return """--cluster-window-size 10 --cluster-size 3 \
-        --filter-name 'QD' --filter 'QD < 2.0' \
-        --filter-name 'FS' --filter 'FS > 60.0' \
-        --filter-name 'MQ_filter' --filter 'MQ < 40.0' \
-        --filter-name 'SOR_filter' --filter 'SOR > 4.0' \
-        --filter-name 'MQRankSum_filter' --filter 'MQRankSum < -12.5' \
-        --filter-name 'ReadPosRankSum_filter' --filter 'ReadPosRankSum < -8.0'"""
+        --filter-name 'QD' --filter-expression 'QD < 2.0' \
+        --filter-name 'FS' --filter-expression 'FS > 60.0' \
+        --filter-name 'MQ_filter' --filter-expression 'MQ < 40.0' \
+        --filter-name 'SOR_filter' --filter-expression 'SOR > 4.0' \
+        --filter-name 'MQRankSum_filter' --filter-expression 'MQRankSum < -12.5' \
+        --filter-name 'ReadPosRankSum_filter' --filter-expression 'ReadPosRankSum < -8.0' \
+        --genotype-filter-name 'GQ' --genotype-filter-expression 'GQ < 20'"""
     elif (wildcards.var_type == "INDEL"):
-        return """--filter-name 'QD' --filter 'QD < 2.0' \
-        --filter-name 'FS' --filter 'FS > 200.0' \
-        --filter-name 'SOR_filter' --filter 'SOR > 10.0'"""
+        return """--filter-name 'QD' --filter-expression 'QD < 2.0' \
+        --filter-name 'FS' --filter-expression 'FS > 200.0' \
+        --filter-name 'SOR_filter' --filter-expression 'SOR > 10.0' \
+        --genotype-filter-name 'GQ' --genotype-filter-expression 'GQ < 20'"""
     else:
         raise Exception("var_type wildcard must be either SNP or INDEL.")
 
@@ -516,6 +524,7 @@ rule filter_vcf:
         -R {params.ref_fasta} \
         -V {output.filt} \
         --exclude-filtered \
+        --set-filtered-gt-to-nocall \
         -O {output.pass_only} 
         
         echo "SelectVariants 2 done."
@@ -593,19 +602,69 @@ rule qualimap:
 
         """
 
-rule snpEff:
+rule concat_variants:
     """
-    Concatenate SNPs and indels and run snpEff.
+    Concatenate SNPs and indels.
     """
     input:
         vcfs=expand("analysis/final/06_filter_vcf/all.merged.filt.PASS.{var_type}.vcf.gz", var_type=["SNP", "INDEL"]),
     output:
-        html="analysis/final/07_snpEff/snpEff.html",
-        genes="analysis/final/07_snpEff/snpEff.genes.txt",
-        merged_vcf="analysis/final/07_snpEff/all.merged.filt.PASS.vcf.gz",
-        annot_vcf="analysis/final/07_snpEff/all.merged.filt.PASS.snpEff.vcf.gz"
+        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.vcf.gz",
     benchmark:
-        "benchmarks/final/07_snpEff/bench.txt"
+        "benchmarks/final/07_annot/concat_variants/bench.txt"
+    envmodules:
+        config['modules']['bcftools']
+    params:
+    resources:
+        mem_gb=100,
+        log_prefix="concat_variants"
+    threads: 8
+    shell:
+        """
+        # merge
+        bcftools concat --threads {threads} --allow-overlaps -O z -o {output.merged_vcf} {input.vcfs}
+        bcftools index --tbi --threads {threads} {output.merged_vcf}
+        
+        """
+
+rule normalize_variants:
+    """
+    Decompose and normalize variants.
+    """
+    input:
+        genome_fa=config['ref']['sequence'],
+        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.vcf.gz"
+    output:
+        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.decomp_and_norm.vcf.gz",
+    benchmark:
+        "benchmarks/final/07_annot/normalize_variants/bench.txt"
+    envmodules:
+        config['modules']['bcftools']
+    params:
+    resources:
+        mem_gb=100,
+        log_prefix="normalize_variants"
+    threads: 8
+    shell:
+        """
+        # see https://github.com/brentp/slivar/wiki/decomposing-and-subsetting-vcfs
+        bcftools norm --threads {threads} --multiallelics - -w 10000 --fasta-ref {input.genome_fa} -O z -o {output.merged_vcf} {input.merged_vcf}
+        bcftools index --tbi --threads {threads} {output.merged_vcf}
+        
+        """
+
+rule snpEff:
+    """
+    Run snpEff.
+    """
+    input:
+        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.vcf.gz"
+    output:
+        html="analysis/final/07_annot/snpEff/snpEff.html",
+        genes="analysis/final/07_annot/snpEff/snpEff.genes.txt",
+        annot_vcf="analysis/final/07_annot/snpEff/all.merged.filt.PASS.snpEff.vcf.gz"
+    benchmark:
+        "benchmarks/final/07_annot/snpEff/bench.txt"
     envmodules:
         config['modules']['snpEff'],
         config['modules']['bcftools']
@@ -618,15 +677,196 @@ rule snpEff:
     threads: 8
     shell:
         """
-        # merge
-        bcftools concat --threads {threads} --allow-overlaps -O z -o {output.merged_vcf} {input.vcfs}
-        bcftools index --tbi --threads {threads} {output.merged_vcf}
         
         # annotate
-        java -Xms8g -Xmx80g -Djava.io.tmpdir=./tmp -jar $SNPEFF/snpEff.jar {params.snpEff_dataDir} -v -stats {output.html} {params.snpEff_genome_id} {output.merged_vcf} | bcftools view --threads {threads} -O z -o {output.annot_vcf} -
+        java -Xms8g -Xmx80g -Djava.io.tmpdir=./tmp -jar $SNPEFF/snpEff.jar {params.snpEff_dataDir} -v -stats {output.html} {params.snpEff_genome_id} {input.merged_vcf} | bcftools view --threads {threads} -O z -o {output.annot_vcf} -
         bcftools index --tbi --threads {threads} {output.annot_vcf}
 
         """
+
+
+rule Funcotator:
+    """
+    Run Funcotator.
+    """
+    input:
+        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.decomp_and_norm.vcf.gz",
+        ref_fa=config['ref']['sequence']
+    output:
+        annot_vcf="analysis/final/07_annot/Funcotator/all.merged.filt.PASS.Funcotator.vcf.gz"
+    benchmark:
+        "benchmarks/final/07_annot/Funcotator/bench.txt"
+    envmodules:
+        config["modules"]["gatk"],
+        config['modules']['bcftools']
+    params:
+        data_sources=config['Funcotator']['data_source'],
+        ref_ver=config['Funcotator']['ref_ver']
+    resources:
+        mem_gb=100,
+        log_prefix="Funcotator"
+    threads: 8
+    shell:
+        """
+        gatk --java-options "-Xms8g -Xmx{resources.mem_gb}g -Djava.io.tmpdir=./tmp" \
+                Funcotator \
+                --data-sources-path {params.data_sources} \
+                --output {output.annot_vcf} \
+                --output-file-format "VCF" \
+                --ref-version {params.ref_ver} \
+                --reference {input.ref_fa} \
+                --variant {input.merged_vcf}
+
+        """
+
+
+
+#rule slivar:
+#    """
+#    Run slivar.
+#    """
+#    input:
+#        merged_vcf="analysis/final/07_annot/all.merged.filt.PASS.decomp_and_norm.vcf.gz",
+#        genome_fa=config['ref']['sequence'],
+#        ensembl_gff3=config['slivar']['ensembl_gff3'],
+#    output:
+#        bcftools_csq="analysis/final/07_annot/slivar/all.merged.filt.PASS.csq.vcf.gz",
+#        slivar="analysis/final/07_annot/slivar/all.merged.filt.PASS.csq.slivar.vcf.gz"
+#    benchmark:
+#        "benchmarks/final/07_annot/slivar/bench.txt"
+#    envmodules:
+#        config['modules']['slivar'],
+#        config['modules']['bcftools']
+#    params:
+#    resources:
+#        mem_gb=100,
+#        log_prefix="slivar"
+#    threads: 8
+#    shell:
+#        """
+#        # see https://github.com/brentp/slivar/wiki/rare-disease
+#        bcftools csq --samples - --ncsq 40 --gff-annot {input.ensembl_gff3} --local-csq --fasta-ref {input.genome_fa} -O z -o {output.bcftools_csq}
+#        bcftools index --tbi --threads {threads} {output.bcftools_csq}
+#
+#
+#        """
+#
+
+
+rule make_BED_from_genes:
+    input:
+        gtf=config['ref']['annotation'],
+        target_genes=config['Funcotator']['genes']
+    output:
+        bed="analysis/final/07_annot/Funcotator/target_genes_only/make_BED_from_genes/target_genes.bed"
+    benchmark:
+        "benchmarks/final/07_annot/make_BED_from_gene/bench.txt"
+    params:
+    threads: 1
+    envmodules:
+        config['modules']['R']
+    resources:
+        mem_gb=64,
+        log_prefix="make_BED_from_genes"
+    shell:
+        """
+        Rscript --vanilla -e "library(rtracklayer); genes <- readLines('{input.target_genes}'); gtf <- import('{input.gtf}'); score(gtf) <- 0; outs <- gtf[gtf\$gene_name %in% genes & gtf\$type=='gene']; names(outs) <- outs\$gene_name; export(outs, '{output.bed}')"
+        """
+
+rule filter_variants_to_targets:
+    """
+    Add FORMAT/VAF tag, filter VCF for just target regions, implement final filters for either a specific sample or all of them.
+    """
+    input:
+        vcf="analysis/final/07_annot/Funcotator/all.merged.filt.PASS.Funcotator.vcf.gz",
+        regions="analysis/final/07_annot/Funcotator/target_genes_only/make_BED_from_genes/target_genes.bed"
+    output:
+        vcf="analysis/final/07_annot/Funcotator/target_genes_only/vcf/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.vcf.gz",
+        funcotator_columns=temp("analysis/final/07_annot/Funcotator/target_genes_only/vcf/{sample}.funcotator_column_names.txt"),
+    benchmark:
+        "benchmarks/final/07_annot/filter_variants_to_targets/{sample}.txt"
+    envmodules:
+        config['modules']['bcftools'],
+    params:
+        sample=lambda wildcards: "" if wildcards.sample == "all" else "-s " + wildcards.sample
+    resources:
+        mem_gb=100,
+        log_prefix=lambda wildcards: "_".join(wildcards)
+    threads: 8
+    shell:
+        """
+        # Filter for just regions of interest, add VAF tag, do final filters
+        bcftools view --threads {threads} -R {input.regions} -O u {params.sample} {input.vcf} | \
+        bcftools +fill-tags - -O u -- -t FORMAT/VAF | \
+        bcftools view --threads {threads} -O z -o {output.vcf} -i 'FMT/DP>9 & FMT/VAF>0.3' -
+
+        bcftools index --tbi --threads {threads} {output.vcf}
+ 
+        # grep the FUNCOTATION column names from the VCF header
+        zcat {output.vcf} | grep '##INFO=<ID=FUNCOTATION' | grep -Po '([^"\s]+\|[^"\s]+)+' > {output.funcotator_columns}
+
+        """
+
+rule make_variant_table:
+    """
+    Final formatting.
+    """
+    input:
+        vcf="analysis/final/07_annot/Funcotator/target_genes_only/vcf/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.vcf.gz",
+        funcotator_columns="analysis/final/07_annot/Funcotator/target_genes_only/vcf/{sample}.funcotator_column_names.txt",
+    output:
+        table="analysis/final/07_annot/Funcotator/target_genes_only/table/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.tsv",
+        final_table="analysis/final/07_annot/Funcotator/target_genes_only/table/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.xlsx"
+    benchmark:
+        "benchmarks/final/07_annot/make_variant_table/{sample}.txt"
+    envmodules:
+        config['modules']['R'],
+        config['modules']['gatk']
+    params:
+    resources:
+        mem_gb=100,
+        log_prefix=lambda wildcards: "_".join(wildcards)
+    threads: 8
+    shell:
+        """
+        # convert vcf to table format
+        gatk VariantsToTable -V {input.vcf} \
+        -F CHROM -F POS -F TYPE -F REF -F ALT -F FUNCOTATION \
+        -GF GT -GF AD -GF VAF \
+        -O {output.table}
+
+        # split the FUNCOTATION column
+        Rscript --vanilla -e 'library(dplyr); library(readr); library(stringr); library(tidyr); library(openxlsx);\
+        colnms <- str_split_1(readLines("{input.funcotator_columns}"), "\\\|");\
+        tab <- read_tsv("{output.table}") %>% \
+        dplyr::select(!one_of("FUNCOTATION"), FUNCOTATION) %>% \
+        dplyr::mutate(FUNCOTATION=str_remove_all(FUNCOTATION, "^\\\[|\\\]$")) %>% \
+        separate(col=FUNCOTATION, into=colnms, sep="\\\|", remove=TRUE);\
+        write.xlsx(tab, "{output.final_table}", overwrite=TRUE)' 
+
+        """
+
+rule custom_filters_and_formating_on_final_table:
+    """
+    Custom filters and formating on final table.
+    """
+    input:
+        "analysis/final/07_annot/Funcotator/target_genes_only/table/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.xlsx"
+    output:
+        v1="analysis/final/07_annot/Funcotator/target_genes_only/custom_filters/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.v1.xlsx",
+        v2="analysis/final/07_annot/Funcotator/target_genes_only/custom_filters/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.v2.xlsx",
+        v3="analysis/final/07_annot/Funcotator/target_genes_only/custom_filters/{sample}.merged.filt.PASS.Funcotator.targetsOnly.filt.v3.xlsx",
+    benchmark:
+        "benchmarks/final/07_annot/custom_filters_and_formating_on_final_table/{sample}.txt"
+    envmodules:
+        config['modules']['R'],
+    params:
+    resources:
+        mem_gb=100,
+        log_prefix=lambda wildcards: "_".join(wildcards)
+    threads: 1
+    script:
+        "scripts/custom_filters_on_final_table.R"
 
 rule multiqc:
     input:

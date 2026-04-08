@@ -1,17 +1,22 @@
 ref:
   # path/to/reference/gDNA.fasta
-    sequence:       /varidata/research/projects/bbc/versioned_references/2023-10-06_11.13.48_v14/data/c.elegans-WBcel235/sequence/c.elegans-WBcel235.fa
-    fai:            /varidata/research/projects/bbc/versioned_references/2023-10-06_11.13.48_v14/data/c.elegans-WBcel235/sequence/c.elegans-WBcel235.fa.fai
-    dict:           /varidata/research/projects/bbc/versioned_references/2023-10-06_11.13.48_v14/data/c.elegans-WBcel235/sequence/c.elegans-WBcel235.dict
+    sequence:       /varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/sequence/hg38_gencode.fa
+    fai:            /varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/sequence/hg38_gencode.fa.fai
+    dict:           /varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/sequence/hg38_gencode.dict
   # path/to/bwa/index/directory
-    index:          /varidata/research/projects/bbc/versioned_references/2023-10-06_11.13.48_v14/data/c.elegans-WBcel235/indexes/bwa/c.elegans-WBcel235
+    index:          /varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/indexes/bwa/hg38_gencode
   # path/to/gtf/file/with/transcripts.gtf
-    annotation:     /varidata/research/projects/bbc/versioned_references/2023-10-06_11.13.48_v14/data/c.elegans-WBcel235/annotation/c.elegans-WBcel235.gtf
-    mito_chr: MtDNA
-    known_snps: "" # if empty, workflow will run do a 'bootstrap' run to generate high quality variants
-    known_indels: "" # if empty, workflow will run do a 'bootstrap' run to generate high quality variants
+    annotation:     /varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/annotation/hg38_gencode.gtf
+    mito_chr: chrM
+    known_snps: "/varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/gatk_resource_bundle/Homo_sapiens_assembly38.dbsnp138.vcf" # if empty, workflow will run do a 'bootstrap' run to generate high quality variants
+    known_indels: "/varidata/research/projects/bbc/versioned_references/2025-11-10_11.00.26_v21/data/hg38_gencode/gatk_resource_bundle/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz" # if empty, workflow will run do a 'bootstrap' run to generate high quality variants
     snpEff_dataDir: "./data/"
-    snpEff_genome_ID: "WBcel235.105"
+    snpEff_genome_ID: "hg38"
+
+Funcotator:
+  data_source: "funcotator_dataSources.v1.8.hg38.20230908g.fixClinvar"
+  ref_ver: "hg38"
+  genes: target_genes.txt
 
 modules:
   bamtools: bbc2/bamtools/bamtools-2.5.2
@@ -21,13 +26,13 @@ modules:
   bwa: bbc2/bwa/bwa-0.7.17
   fastqc: bbc2/fastqc/fastqc-0.12.1
   fastq_screen: bbc2/fastq_screen/fastq_screen-0.14.0
-  gatk: bbc2/gatk/gatk-4.1.8.1
+  gatk: bbc2/gatk/gatk-4.6.2.0
   multiqc: bbc2/multiqc/multiqc-1.14
   picard: bbc2/picard/picard-2.27.5
   qualimap: bbc2/qualimap/qualimap_v.2.2.2
   R: bbc2/R/alt/R-4.2.1-setR_LIBS_USER
   samblaster: bbc2/samblaster/samblaster-0.1.26
   samtools: bbc2/samtools/samtools-1.17
-  snpEff: bbc2/SnpEff/SnpEff-5.1
+  snpEff: bbc2/SnpEff/SnpEff-5.3a
   trim_galore: bbc2/trim_galore/trim_galore-0.6.0
   vt: bbc2/vt/vt-0.1.16
