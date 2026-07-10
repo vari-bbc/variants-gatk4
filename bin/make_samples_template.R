@@ -12,7 +12,7 @@ option_list <- list(
               help="Set if single-end reads."),
   make_option(c("-s", "--sample_rgx"), type="character", default="^[^_]+", 
               help="Regex to extract sample name. [default = %default]", metavar="character"),
-  make_option(c("-r", "--r1_rgx"), type="character", default="_R1_", 
+  make_option(c("-r", "--r1_rgx"), type="character", default="[._-]R?1([._-]|$)",
               help="R1 plus leading and trailing characters. [default = %default]", metavar="character"),
   make_option(c("-o", "--out"), type="character", default="samples_template.tsv", 
               help="output file name [default = %default]", metavar="character")
