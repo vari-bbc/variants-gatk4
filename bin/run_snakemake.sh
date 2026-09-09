@@ -3,7 +3,7 @@
 #SBATCH -J variants_workflow
 #SBATCH -o logs/variants_workflow.o
 #SBATCH -e logs/variants_workflow.e
-#SBATCH --time 120:00:00
+#SBATCH --time 95:00:00
 #SBATCH --mem=8G
 
 #set -euo pipefail
